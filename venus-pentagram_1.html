@@ -1,0 +1,451 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Venus Pentagram</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@300;400;600&family=JetBrains+Mono:wght@300&display=swap');
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: #05060f;
+    color: #d4c9a8;
+    font-family: 'Cormorant Garamond', serif;
+    height: 100vh;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+
+  canvas { display: block; flex: 1; }
+
+  .controls {
+    position: fixed;
+    bottom: 24px;
+    display: flex;
+    gap: 20px;
+    align-items: center;
+    z-index: 10;
+    background: rgba(5,6,15,0.85);
+    border: 1px solid rgba(212,201,168,0.15);
+    border-radius: 40px;
+    padding: 12px 28px;
+    backdrop-filter: blur(12px);
+  }
+
+  .controls label {
+    font-size: 13px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    font-weight: 300;
+    color: rgba(212,201,168,0.6);
+  }
+
+  .controls input[type=range] {
+    -webkit-appearance: none;
+    width: 110px;
+    height: 3px;
+    background: rgba(212,201,168,0.2);
+    border-radius: 2px;
+    outline: none;
+  }
+  .controls input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 14px; height: 14px;
+    border-radius: 50%;
+    background: #e8c85a;
+    cursor: pointer;
+    box-shadow: 0 0 8px rgba(232,200,90,0.5);
+  }
+
+  button.ctrl {
+    background: none;
+    border: 1px solid rgba(212,201,168,0.25);
+    color: #d4c9a8;
+    font-family: 'Cormorant Garamond', serif;
+    font-size: 14px;
+    padding: 6px 18px;
+    border-radius: 20px;
+    cursor: pointer;
+    letter-spacing: 0.06em;
+    transition: all 0.3s;
+  }
+  button.ctrl:hover {
+    background: rgba(232,200,90,0.12);
+    border-color: #e8c85a;
+    color: #e8c85a;
+  }
+
+  .info {
+    position: fixed;
+    top: 24px;
+    left: 50%;
+    transform: translateX(-50%);
+    text-align: center;
+    z-index: 10;
+    pointer-events: none;
+  }
+  .info h1 {
+    font-size: 28px;
+    font-weight: 300;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    color: rgba(232,200,90,0.8);
+    margin-bottom: 4px;
+  }
+  .info p {
+    font-size: 13px;
+    font-family: 'JetBrains Mono', monospace;
+    font-weight: 300;
+    color: rgba(212,201,168,0.4);
+    letter-spacing: 0.05em;
+  }
+
+  .year-display {
+    position: fixed;
+    top: 90px;
+    left: 50%;
+    transform: translateX(-50%);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 15px;
+    font-weight: 300;
+    color: rgba(232,200,90,0.55);
+    z-index: 10;
+    pointer-events: none;
+  }
+</style>
+</head>
+<body>
+<div class="info">
+  <h1>Venus Pentagram</h1>
+  <p>8-year cycle · 5 conjunctions · 13:8 resonance</p>
+</div>
+<div class="year-display" id="yearDisplay">Year 0.00 / 8.00</div>
+<canvas id="c"></canvas>
+<div class="controls">
+  <label>Speed</label>
+  <input type="range" id="speed" min="0.1" max="5" step="0.1" value="1">
+  <button class="ctrl" id="toggleBtn">Pause</button>
+  <button class="ctrl" id="resetBtn">Reset</button>
+  <label>Trail</label>
+  <input type="range" id="trail" min="0" max="1" step="0.01" value="0.85">
+</div>
+
+<script>
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+let W, H, cx, cy, scale;
+
+function resize() {
+  W = canvas.width = window.innerWidth;
+  H = canvas.height = window.innerHeight;
+  cx = W / 2;
+  cy = H / 2;
+  scale = Math.min(W, H) * 0.32;
+}
+resize();
+window.addEventListener('resize', resize);
+
+const earthYear = 365.25;
+const venusYear = 224.7;
+const earthR = 1.0;
+const venusR = 0.723;
+const synodicPeriod = 1 / (1/venusYear - 1/earthYear);
+
+let t = 0;
+const totalDays = 8 * earthYear;
+let playing = true;
+let trailPoints = [];
+let conjunctions = [];
+
+const stars = Array.from({length: 300}, () => ({
+  x: Math.random(), y: Math.random(),
+  s: Math.random() * 1.5 + 0.3, b: Math.random()
+}));
+
+function earthPos(day) {
+  const a = (2 * Math.PI * day) / earthYear;
+  return { x: earthR * Math.cos(a), y: earthR * Math.sin(a) };
+}
+function venusPos(day) {
+  const a = (2 * Math.PI * day) / venusYear;
+  return { x: venusR * Math.cos(a), y: venusR * Math.sin(a) };
+}
+function geoVenus(day) {
+  const e = earthPos(day);
+  const v = venusPos(day);
+  return { x: v.x - e.x, y: v.y - e.y };
+}
+
+// Precompute the 5 inferior conjunction geocentric positions
+function findConjunctionPoints() {
+  const pts = [];
+  for (let i = 0; i < 5; i++) {
+    const approxDay = i * Math.abs(synodicPeriod);
+    let bestDay = approxDay, bestDist = Infinity;
+    for (let d = approxDay - 30; d < approxDay + 30; d += 0.05) {
+      if (d < 0) continue;
+      const e = earthPos(d);
+      const v = venusPos(d);
+      const dist = Math.hypot(v.x - e.x, v.y - e.y);
+      if (dist < bestDist) { bestDist = dist; bestDay = d; }
+    }
+    pts.push({ day: bestDay, pos: geoVenus(bestDay) });
+  }
+  return pts;
+}
+
+const precomputedConj = findConjunctionPoints();
+const pentOrder = [0, 2, 4, 1, 3, 0];
+
+const speedEl = document.getElementById('speed');
+const trailEl = document.getElementById('trail');
+const toggleBtn = document.getElementById('toggleBtn');
+const resetBtn = document.getElementById('resetBtn');
+const yearDisplay = document.getElementById('yearDisplay');
+
+toggleBtn.addEventListener('click', () => {
+  playing = !playing;
+  toggleBtn.textContent = playing ? 'Pause' : 'Play';
+});
+resetBtn.addEventListener('click', () => {
+  t = 0; trailPoints = []; conjunctions = []; prevDist = null;
+});
+
+function toScreen(p) {
+  return { x: cx + p.x * scale, y: cy + p.y * scale };
+}
+
+function drawStars() {
+  stars.forEach(s => {
+    const flicker = 0.5 + 0.5 * Math.sin(t * 0.002 + s.b * 100);
+    ctx.fillStyle = `rgba(212,201,168,${0.15 + 0.35 * flicker})`;
+    ctx.beginPath();
+    ctx.arc(s.x * W, s.y * H, s.s, 0, Math.PI * 2);
+    ctx.fill();
+  });
+}
+
+function drawPentagramGuide() {
+  const pts = precomputedConj.map(c => toScreen(c.pos));
+  const progress = Math.min(t / totalDays, 1);
+
+  // Pentagon (outer shape)
+  ctx.save();
+  ctx.globalAlpha = 0.08 + progress * 0.12;
+  ctx.strokeStyle = 'rgba(212,201,168,0.35)';
+  ctx.lineWidth = 1;
+  ctx.setLineDash([4, 8]);
+  ctx.beginPath();
+  ctx.moveTo(pts[0].x, pts[0].y);
+  for (let i = 1; i < 5; i++) ctx.lineTo(pts[i].x, pts[i].y);
+  ctx.closePath();
+  ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.restore();
+
+  // Pentagram star outline (dashed guide)
+  ctx.save();
+  ctx.globalAlpha = 0.1 + progress * 0.2;
+  ctx.strokeStyle = 'rgba(232,200,90,0.4)';
+  ctx.lineWidth = 1;
+  ctx.setLineDash([6, 6]);
+  ctx.beginPath();
+  ctx.moveTo(pts[pentOrder[0]].x, pts[pentOrder[0]].y);
+  for (let i = 1; i < pentOrder.length; i++) {
+    ctx.lineTo(pts[pentOrder[i]].x, pts[pentOrder[i]].y);
+  }
+  ctx.closePath();
+  ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.restore();
+
+  // Small markers at each precomputed point
+  ctx.save();
+  ctx.globalAlpha = 0.15 + progress * 0.15;
+  pts.forEach((p, i) => {
+    ctx.strokeStyle = 'rgba(232,200,90,0.3)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, 8, 0, Math.PI * 2);
+    ctx.stroke();
+  });
+  ctx.restore();
+}
+
+function drawReachedConjunctions() {
+  const n = conjunctions.length;
+  for (let i = 0; i < n; i++) {
+    const sp = toScreen(conjunctions[i].pos);
+    // Bright glow
+    ctx.shadowColor = '#e8c85a';
+    ctx.shadowBlur = 20;
+    ctx.strokeStyle = 'rgba(232,200,90,0.7)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(sp.x, sp.y, 12, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.shadowBlur = 0;
+    // Inner dot
+    ctx.fillStyle = '#e8c85a';
+    ctx.beginPath();
+    ctx.arc(sp.x, sp.y, 3.5, 0, Math.PI * 2);
+    ctx.fill();
+    // Label
+    ctx.fillStyle = 'rgba(232,200,90,0.8)';
+    ctx.font = '12px "JetBrains Mono", monospace';
+    ctx.fillText(`#${i + 1}`, sp.x + 17, sp.y + 4);
+  }
+
+  // Solid pentagram edges between reached conjunctions
+  if (n >= 2) {
+    const edges = [[0,2],[2,4],[4,1],[1,3],[3,0]];
+    ctx.save();
+    ctx.shadowColor = '#e8c85a';
+    ctx.shadowBlur = 10;
+    ctx.strokeStyle = 'rgba(232,200,90,0.55)';
+    ctx.lineWidth = 2;
+    for (const [a,b] of edges) {
+      if (a < n && b < n) {
+        const pa = toScreen(conjunctions[a].pos);
+        const pb = toScreen(conjunctions[b].pos);
+        ctx.beginPath();
+        ctx.moveTo(pa.x, pa.y);
+        ctx.lineTo(pb.x, pb.y);
+        ctx.stroke();
+      }
+    }
+    ctx.shadowBlur = 0;
+    ctx.restore();
+  }
+
+  // Fill completed pentagram
+  if (n >= 5) {
+    const pulse = 0.04 + 0.03 * Math.sin(t * 0.005);
+    ctx.save();
+    ctx.globalAlpha = pulse;
+    ctx.fillStyle = '#e8c85a';
+    ctx.beginPath();
+    const s0 = toScreen(conjunctions[pentOrder[0]].pos);
+    ctx.moveTo(s0.x, s0.y);
+    for (let i = 1; i < pentOrder.length; i++) {
+      const p = toScreen(conjunctions[pentOrder[i]].pos);
+      ctx.lineTo(p.x, p.y);
+    }
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+  }
+}
+
+function drawMiniView() {
+  const ms = Math.min(W, H) * 0.08;
+  const mx = 70, my = H - 110;
+
+  ctx.save();
+  ctx.fillStyle = 'rgba(5,6,15,0.6)';
+  ctx.beginPath(); ctx.arc(mx, my, ms * 1.3, 0, Math.PI * 2); ctx.fill();
+  ctx.strokeStyle = 'rgba(212,201,168,0.1)'; ctx.lineWidth = 1; ctx.stroke();
+
+  ctx.globalAlpha = 0.35;
+  ctx.fillStyle = '#e8c85a';
+  ctx.beginPath(); ctx.arc(mx, my, 4, 0, Math.PI * 2); ctx.fill();
+  ctx.strokeStyle = 'rgba(212,201,168,0.15)'; ctx.lineWidth = 0.5;
+  ctx.beginPath(); ctx.arc(mx, my, venusR * ms, 0, Math.PI * 2); ctx.stroke();
+  ctx.beginPath(); ctx.arc(mx, my, earthR * ms, 0, Math.PI * 2); ctx.stroke();
+
+  ctx.globalAlpha = 0.7;
+  const ep = earthPos(t), vp = venusPos(t);
+  ctx.fillStyle = '#5b8fd4';
+  ctx.beginPath(); ctx.arc(mx + ep.x * ms, my + ep.y * ms, 3, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = '#e8c85a';
+  ctx.beginPath(); ctx.arc(mx + vp.x * ms, my + vp.y * ms, 3, 0, Math.PI * 2); ctx.fill();
+
+  ctx.strokeStyle = 'rgba(232,200,90,0.25)'; ctx.lineWidth = 0.5;
+  ctx.beginPath();
+  ctx.moveTo(mx + ep.x * ms, my + ep.y * ms);
+  ctx.lineTo(mx + vp.x * ms, my + vp.y * ms);
+  ctx.stroke();
+
+  ctx.globalAlpha = 0.4;
+  ctx.fillStyle = '#d4c9a8';
+  ctx.font = '10px "JetBrains Mono", monospace';
+  ctx.fillText('Heliocentric', mx - 32, my + ms * 1.3 + 14);
+  ctx.restore();
+}
+
+let prevDist = null;
+
+function draw() {
+  const trailAlpha = parseFloat(trailEl.value);
+  ctx.fillStyle = `rgba(5,6,15,${0.06 + (1 - trailAlpha) * 0.3})`;
+  ctx.fillRect(0, 0, W, H);
+
+  drawStars();
+  drawPentagramGuide();
+
+  // Venus trail
+  if (trailPoints.length > 1) {
+    for (let i = 1; i < trailPoints.length; i++) {
+      const prog = i / trailPoints.length;
+      const sp = toScreen(trailPoints[i - 1]);
+      const ep = toScreen(trailPoints[i]);
+      ctx.strokeStyle = `rgba(232,200,90,${prog * 0.6})`;
+      ctx.lineWidth = 0.8 + prog * 1.5;
+      ctx.beginPath();
+      ctx.moveTo(sp.x, sp.y);
+      ctx.lineTo(ep.x, ep.y);
+      ctx.stroke();
+    }
+  }
+
+  drawReachedConjunctions();
+
+  // Earth
+  ctx.fillStyle = '#5b8fd4';
+  ctx.shadowColor = '#5b8fd4'; ctx.shadowBlur = 18;
+  ctx.beginPath(); ctx.arc(cx, cy, 5, 0, Math.PI * 2); ctx.fill();
+  ctx.shadowBlur = 0;
+  ctx.fillStyle = 'rgba(91,143,212,0.5)';
+  ctx.font = '11px "JetBrains Mono", monospace';
+  ctx.fillText('Earth', cx + 10, cy + 4);
+
+  // Venus
+  const gv = geoVenus(t);
+  const vs = toScreen(gv);
+  ctx.fillStyle = '#e8c85a';
+  ctx.shadowColor = '#e8c85a'; ctx.shadowBlur = 22;
+  ctx.beginPath(); ctx.arc(vs.x, vs.y, 4, 0, Math.PI * 2); ctx.fill();
+  ctx.shadowBlur = 0;
+
+  drawMiniView();
+
+  const years = t / earthYear;
+  yearDisplay.textContent = `Year ${years.toFixed(2)} / 8.00  ·  Conjunctions: ${conjunctions.length}/5`;
+
+  if (playing && t < totalDays) {
+    const e = earthPos(t), v = venusPos(t);
+    const dist = Math.hypot(v.x - e.x, v.y - e.y);
+    if (prevDist !== null && dist > prevDist && prevDist < 0.3 && conjunctions.length < 5) {
+      const tooClose = conjunctions.some(c => Math.abs(c.day - t) < 100);
+      if (!tooClose) {
+        conjunctions.push({ day: t, pos: geoVenus(t - 2) });
+      }
+    }
+    prevDist = dist;
+
+    const speed = parseFloat(speedEl.value);
+    t = Math.min(t + speed * 4, totalDays);
+    trailPoints.push({ x: gv.x, y: gv.y });
+  }
+
+  requestAnimationFrame(draw);
+}
+
+draw();
+</script>
+</body>
+</html>
